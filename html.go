@@ -3,6 +3,7 @@ package html
 import (
 	"errors"
 	"fmt"
+
 	css "github.com/andybalholm/cascadia"
 	log "github.com/golang/glog"
 	"golang.org/x/net/html"
@@ -124,73 +125,42 @@ func Marshal(n *html.Node, v interface{}) error {
 
 		//log.Errorf("tag.Opt %v, tag.name %v", tag.Opt, tag.Name)
 		//log.Flush()
-		var match *html.Node
+		var matchA []*html.Node
 		// self
 		if tag.Name == "_" {
-			match = n
+			matchA = []*html.Node{n}
 		} else {
-			match, err = firstMatch(n, tag.Name)
+			//match, err = firstMatch(n, tag.Name)
+			matchA, err = allMatch(n, tag.Name)
 			if err != nil {
 				log.Error(err)
 				return err
 			}
 		}
-		switch ft.Kind() {
-		default:
-			if err = setField(n, match, tag, fv); err != nil {
+		for k := range matchA {
+			if err := marshalField(n, matchA[k], ft, fv, tag); err != nil {
 				log.Error(err)
 				return err
 			}
-		case reflect.Bool:
-			if fv.Interface().(bool) == false {
-				if tag.Omitempty {
-					removeField(n, tag.Name)
-					continue
-				}
-				if tag.OmitemptyAttr {
-					removeAttribute(n, tag.Name, tag.Attribute)
-					continue
-				}
-			}
-			if err = setField(n, match, tag, fv); err != nil {
-				log.Error(err)
-				return err
-			}
-		case reflect.String:
-			if fv.Interface().(string) == "" {
-				if tag.Omitempty {
-					removeField(n, tag.Name)
-					continue
-				}
-				if tag.OmitemptyAttr {
-					removeAttribute(n, tag.Name, tag.Attribute)
-					continue
-				}
-			}
-			if err = setField(n, match, tag, fv); err != nil {
-				log.Error(err)
-				return err
-			}
-		case reflect.Struct:
-			if err = Marshal(match, fv.Interface()); err != nil {
-				return err
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < fv.Len(); i++ {
-				v := fv.Index(i)
-				clone := Clone(match)
-				if err = Marshal(clone, v.Interface()); err != nil {
-					return err
-				}
-				//n.InsertBefore(clone, match.FirstChild)
-				//match.Parent.AppendChild(clone)
-				match.Parent.InsertBefore(clone, match)
-			}
-			// remove template / initial values?
-			match.Parent.RemoveChild(match)
 		}
 	}
 	return nil
+}
+func allMatch(n *html.Node, s string) ([]*html.Node, error) {
+	sel, err := css.Compile(s)
+	if err != nil {
+		return nil, errors.New("selector invalid: " + string(s) + ": " + err.Error())
+	}
+	match := sel.MatchAll(n)
+	if match == nil {
+		//	log.Errorf("N %#v", n)
+		//	log.Flush()
+		buf := bytes.NewBuffer(nil)
+		html.Render(buf, n)
+		return nil, errors.New("sels " + s +
+			": not found, html: " + buf.String())
+	}
+	return match, nil
 }
 
 func firstMatch(n *html.Node, s string) (*html.Node, error) {
@@ -210,6 +180,63 @@ func firstMatch(n *html.Node, s string) (*html.Node, error) {
 	return match, nil
 }
 
+func marshalField(n, match *html.Node, ft reflect.Type, fv reflect.Value, tag Tag) error {
+	switch ft.Kind() {
+	default:
+		if err := setField(n, match, tag, fv); err != nil {
+			log.Error(err)
+			return err
+		}
+	case reflect.Bool:
+		if fv.Interface().(bool) == false {
+			if tag.Omitempty {
+				removeField(n, tag.Name)
+				return nil
+			}
+			if tag.OmitemptyAttr {
+				removeAttribute(n, tag.Name, tag.Attribute)
+				return nil
+			}
+		}
+		if err := setField(n, match, tag, fv); err != nil {
+			log.Error(err)
+			return err
+		}
+	case reflect.String:
+		if fv.Interface().(string) == "" {
+			if tag.Omitempty {
+				removeField(n, tag.Name)
+				return nil
+			}
+			if tag.OmitemptyAttr {
+				removeAttribute(n, tag.Name, tag.Attribute)
+				return nil
+			}
+		}
+		if err := setField(n, match, tag, fv); err != nil {
+			log.Error(err)
+			return err
+		}
+	case reflect.Struct:
+		if err := Marshal(match, fv.Interface()); err != nil {
+			return err
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < fv.Len(); i++ {
+			v := fv.Index(i)
+			clone := Clone(match)
+			if err := Marshal(clone, v.Interface()); err != nil {
+				return err
+			}
+			//n.InsertBefore(clone, match.FirstChild)
+			//match.Parent.AppendChild(clone)
+			match.Parent.InsertBefore(clone, match)
+		}
+		// remove template / initial values?
+		match.Parent.RemoveChild(match)
+	}
+	return nil
+}
 func setField(n, match *html.Node, tag Tag, fv reflect.Value) error {
 	//log.Errorf("Kind is %v", ft.Kind())
 	data := fmt.Sprintf("%v", fv.Interface())
