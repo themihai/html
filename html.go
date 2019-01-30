@@ -36,6 +36,7 @@ func parseTag(s string) (Tag, error) {
 	switch {
 	case tag.Opt == "omitempty": // it's a struct with omitempty
 		tag.Omitempty = true
+		tag.Opt = ""
 	case strings.HasPrefix(tag.Opt, "attr."):
 		tag.Attribute = strings.TrimPrefix(tag.Opt, "attr.")
 		switch {
@@ -133,13 +134,14 @@ func Marshal(n *html.Node, v interface{}) error {
 			//match, err = firstMatch(n, tag.Name)
 			matchA, err = allMatch(n, tag.Name)
 			if err != nil {
-				log.Error(err)
+				log.Errorf("tag %#v, fi %#v, ft %#v, fv %#v,  err %v",
+					tag, fi, ft, fv, err)
 				return err
 			}
 		}
 		for k := range matchA {
 			if err := marshalField(n, matchA[k], ft, fv, tag); err != nil {
-				log.Error(err)
+				log.Errorf("tag %#v, err %v", tag, err)
 				return err
 			}
 		}
@@ -243,8 +245,7 @@ func setField(n, match *html.Node, tag Tag, fv reflect.Value) error {
 	switch {
 	case tag.Opt == "data":
 		n.Data = data
-	case tag.Opt == "text":
-		//n.Data = data
+	case tag.Opt == "text" || tag.Opt == "":
 		if !setText(match, data) {
 			return errors.New("sels " + tag.Name + " text children")
 		}
